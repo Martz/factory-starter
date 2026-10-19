@@ -1,0 +1,208 @@
+diff --git a/lunchbox/cli.py b/lunchbox/cli.py
+index 5253990..642c43f 100644
+--- a/lunchbox/cli.py
++++ b/lunchbox/cli.py
+@@ -12,12 +12,28 @@ from pathlib import Path
+ from .orders import Order
+ 
+ 
++class RowError(ValueError):
++    """A bad CSV row; `line` is the physical line number in the file (header is line 1)."""
++
++    def __init__(self, line: int, message: str):
++        super().__init__(message)
++        self.line = line
++
++
+ def load(path: Path) -> Order:
+     order = Order()
+     with path.open(newline="", encoding="utf-8") as f:
+-        for row in csv.DictReader(f):
++        reader = csv.reader(f)
++        header = next(reader, None) or []
++        for values in reader:
++            if not values:
++                continue
++            row = dict(zip(header, values))
+             tags = tuple((row.get("tags") or "").split(";"))
+-            order.add(row["person"], row["item"], row["price"], tags)
++            try:
++                order.add(row.get("person") or "", row.get("item") or "", row.get("price"), tags)
++            except ValueError as e:
++                raise RowError(reader.line_num, str(e)) from None
+     return order
+ 
+ 
+@@ -33,7 +49,12 @@ def main(argv: list[str] | None = None) -> int:
+     ap = argparse.ArgumentParser(prog="lunchbox", description="Split a group lunch order.")
+     ap.add_argument("order", type=Path, help="CSV file: person,item,price[,tags]")
+     args = ap.parse_args(argv)
+-    print(render(load(args.order)))
++    try:
++        order = load(args.order)
++    except RowError as e:
++        print(f"error: line {e.line}: {e}", file=sys.stderr)
++        return 2
++    print(render(order))
+     return 0
+ 
+ 
+diff --git a/lunchbox/orders.py b/lunchbox/orders.py
+index b0a78e8..cdcfa26 100644
+--- a/lunchbox/orders.py
++++ b/lunchbox/orders.py
+@@ -2,7 +2,7 @@
+ from __future__ import annotations
+ 
+ from dataclasses import dataclass, field
+-from decimal import Decimal, ROUND_HALF_UP
++from decimal import Decimal, InvalidOperation, ROUND_HALF_UP
+ 
+ PENNY = Decimal("0.01")
+ 
+@@ -25,7 +25,18 @@ class Order:
+     items: list[Item] = field(default_factory=list)
+ 
+     def add(self, person: str, name: str, price: Decimal | str, tags: tuple[str, ...] = ()) -> Item:
+-        item = Item(person=person.strip(), name=name.strip(), price=money(price), tags=frozenset(t.strip().lower() for t in tags if t.strip()))
++        person, name = person.strip(), name.strip()
++        where = f"{person}'s {name}"
++        try:
++            amount = Decimal(str(price).strip())
++            if not amount.is_finite():
++                raise ValueError("not a finite number")
++            amount = money(amount)
++        except (InvalidOperation, ValueError, TypeError):
++            raise ValueError(f"invalid price {price!r} for {where}: not a valid number") from None
++        if amount <= 0:
++            raise ValueError(f"invalid price {price!r} for {where}: price must be greater than zero")
++        item = Item(person=person, name=name, price=amount, tags=frozenset(t.strip().lower() for t in tags if t.strip()))
+         self.items.append(item)
+         return item
+ 
+diff --git a/tests/test_cli.py b/tests/test_cli.py
+index 0153ccb..1389753 100644
+--- a/tests/test_cli.py
++++ b/tests/test_cli.py
+@@ -1,8 +1,10 @@
++import contextlib
++import io
+ import tempfile
+ import unittest
+ from pathlib import Path
+ 
+-from lunchbox.cli import load, render
++from lunchbox.cli import load, main, render
+ 
+ CSV = """person,item,price,tags
+ Ada,Falafel wrap,7.50,vegan
+@@ -23,5 +25,59 @@ class CliTest(unittest.TestCase):
+         self.assertTrue(out.strip().endswith("19.65"))
+ 
+ 
++def run_cli(text):
++    with tempfile.TemporaryDirectory() as d:
++        path = Path(d) / "order.csv"
++        path.write_text(text)
++        out, err = io.StringIO(), io.StringIO()
++        with contextlib.redirect_stdout(out), contextlib.redirect_stderr(err):
++            code = main([str(path)])
++    return code, out.getvalue(), err.getvalue()
++
++
++class BadRowTest(unittest.TestCase):
++    def test_bad_row_reports_line_and_exits_2(self):
++        code, out, err = run_cli("person,item,price\nAda,Tea,2.00\nBob,Coffee,-4.50\n")
++        self.assertEqual(code, 2)
++        self.assertEqual(out, "")
++        self.assertNotIn("Traceback", err)
++        lines = err.splitlines()
++        self.assertEqual(len(lines), 1)
++        self.assertTrue(lines[0].startswith("error: line 3: "))
++        self.assertIn("Bob", lines[0])
++        self.assertIn("Coffee", lines[0])
++
++    def test_non_numeric_and_empty_prices_are_reported(self):
++        for price in ("abc", "", "0", "NaN"):
++            with self.subTest(price=price):
++                code, out, err = run_cli(f"person,item,price\nBob,Coffee,{price}\n")
++                self.assertEqual((code, out), (2, ""))
++                self.assertTrue(err.startswith("error: line 2: "))
++                self.assertEqual(len(err.splitlines()), 1)
++
++    def test_line_number_is_physical_with_blank_lines(self):
++        code, _, err = run_cli("person,item,price\n\nAda,Tea,2.00\n\nBob,Coffee,-1\n")
++        self.assertEqual(code, 2)
++        self.assertTrue(err.startswith("error: line 5: "))
++
++    def test_line_number_counts_quoted_multiline_fields(self):
++        code, _, err = run_cli('person,item,price\nAda,"Tea\nwith milk",2.00\nBob,Coffee,-1\n')
++        self.assertEqual(code, 2)
++        self.assertTrue(err.startswith("error: line 4: "))
++
++    def test_only_first_bad_row_reported(self):
++        code, _, err = run_cli("person,item,price\nAda,Tea,0\nBob,Coffee,-1\n")
++        self.assertEqual(code, 2)
++        self.assertEqual(len(err.splitlines()), 1)
++        self.assertTrue(err.startswith("error: line 2: "))
++        self.assertIn("Ada", err)
++
++    def test_valid_csv_prints_table_and_exits_0(self):
++        code, out, err = run_cli(CSV)
++        self.assertEqual((code, err), (0, ""))
++        self.assertTrue(out.strip().splitlines()[-1].startswith("TOTAL"))
++        self.assertTrue(out.strip().endswith("19.65"))
++
++
+ if __name__ == "__main__":
+     unittest.main()
+diff --git a/tests/test_orders.py b/tests/test_orders.py
+index 2c55573..f31abe0 100644
+--- a/tests/test_orders.py
++++ b/tests/test_orders.py
+@@ -30,5 +30,45 @@ class OrderTest(unittest.TestCase):
+         self.assertEqual(self.order.people(), ["Ada", "Grace"])
+ 
+ 
++class PriceValidationTest(unittest.TestCase):
++    def assertRejected(self, price):
++        order = Order()
++        order.add("Bob", "Tea", "1.00")
++        before = list(order.items)
++        with self.assertRaises(ValueError) as cm:
++            order.add("Ada", "Coffee", price)
++        self.assertIn("Ada", str(cm.exception))
++        self.assertIn("Coffee", str(cm.exception))
++        self.assertEqual(order.items, before)
++
++    def test_negative_price_rejected(self):
++        self.assertRejected("-4.50")
++
++    def test_zero_prices_rejected(self):
++        for price in ("0", "0.00", 0, "-0"):
++            with self.subTest(price=price):
++                self.assertRejected(price)
++
++    def test_price_rounding_to_zero_rejected(self):
++        self.assertRejected("0.004")
++
++    def test_half_penny_rounds_up_and_is_accepted(self):
++        item = Order().add("Ada", "Coffee", "0.005")
++        self.assertEqual(item.price, Decimal("0.01"))
++
++    def test_non_numeric_prices_rejected(self):
++        for price in ("abc", "", "   ", "NaN", "Infinity", "-Infinity", None,
++                      float("nan"), float("inf"), float("-inf"), "1e999999"):
++            with self.subTest(price=price):
++                self.assertRejected(price)
++
++    def test_valid_prices_accepted(self):
++        order = Order()
++        for price in ("7.50", "0.01", 3):
++            order.add("Ada", "Coffee", price)
++        self.assertEqual(order.total(), Decimal("10.51"))
++        self.assertEqual(order.per_person(), {"Ada": order.total()})
++
++
+ if __name__ == "__main__":
+     unittest.main()

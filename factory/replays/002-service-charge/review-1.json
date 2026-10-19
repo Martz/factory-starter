@@ -1,0 +1,8 @@
+{
+ "agent": "codex",
+ "seconds": 25.4,
+ "text": "{\"verdict\":\"approve\",\"criteria\":[{\"id\":1,\"met\":true,\"evidence\":\"ServiceChargeTest.test_default_service_is_zero; CliTest.test_no_service_output_is_unchanged\"},{\"id\":2,\"met\":true,\"evidence\":\"ServiceChargeTest.test_total_includes_service_rounded_half_up\"},{\"id\":3,\"met\":true,\"evidence\":\"ServiceChargeTest.test_service_is_shared_in_proportion; Order.people() lists only people with items\"},{\"id\":4,\"met\":true,\"evidence\":\"ServiceChargeTest.test_pennies_always_add_up_exactly; test_leftover_pennies_break_ties_by_name; test_per_person_amounts_have_two_decimal_places\"},{\"id\":5,\"met\":true,\"evidence\":\"CliTest.test_service_flag_shares_charge_and_totals covers the flag before and after the file\"},{\"id\":6,\"met\":true,\"evidence\":\"CliTest.test_invalid_service_is_rejected_on_stderr; ServiceChargeTest.test_invalid_service_raises_value_error\"},{\"id\":7,\"met\":true,\"evidence\":\"New coverage is in tests/test_orders.py and tests/test_cli.py; the supplied diff shows no removed or weakened tests\"}],\"findings\":[],\"summary\":\"The service charge, proportional penny allocation, CLI flag, and validation meet the spec, with tests covering the requested behavior and no identified rule violations.\"}",
+ "usage": {
+  "tokens": 14524
+ }
+}

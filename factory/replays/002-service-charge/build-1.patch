@@ -1,0 +1,246 @@
+diff --git a/lunchbox/cli.py b/lunchbox/cli.py
+index 5253990..f97641d 100644
+--- a/lunchbox/cli.py
++++ b/lunchbox/cli.py
+@@ -7,13 +7,14 @@ from __future__ import annotations
+ import argparse
+ import csv
+ import sys
++from decimal import Decimal
+ from pathlib import Path
+ 
+-from .orders import Order
++from .orders import Order, parse_percent
+ 
+ 
+-def load(path: Path) -> Order:
+-    order = Order()
++def load(path: Path, service: Decimal | str = Decimal("0")) -> Order:
++    order = Order(service=service)
+     with path.open(newline="", encoding="utf-8") as f:
+         for row in csv.DictReader(f):
+             tags = tuple((row.get("tags") or "").split(";"))
+@@ -29,11 +30,20 @@ def render(order: Order) -> str:
+     return "\n".join(lines)
+ 
+ 
++def service_percent(text: str) -> Decimal:
++    try:
++        return parse_percent(text)
++    except ValueError as e:
++        raise argparse.ArgumentTypeError(str(e)) from None
++
++
+ def main(argv: list[str] | None = None) -> int:
+     ap = argparse.ArgumentParser(prog="lunchbox", description="Split a group lunch order.")
+     ap.add_argument("order", type=Path, help="CSV file: person,item,price[,tags]")
++    ap.add_argument("--service", type=service_percent, default=Decimal("0"), metavar="PCT",
++                    help="service charge percentage, shared in proportion to each person's items (default 0)")
+     args = ap.parse_args(argv)
+-    print(render(load(args.order)))
++    print(render(load(args.order, args.service)))
+     return 0
+ 
+ 
+diff --git a/lunchbox/orders.py b/lunchbox/orders.py
+index b0a78e8..c76d539 100644
+--- a/lunchbox/orders.py
++++ b/lunchbox/orders.py
+@@ -20,9 +20,24 @@ class Item:
+     tags: frozenset[str] = frozenset()
+ 
+ 
++def parse_percent(value: Decimal | str | int | float) -> Decimal:
++    """Parse a non-negative, finite percentage as Decimal or raise ValueError."""
++    try:
++        pct = Decimal(str(value).strip())
++    except ArithmeticError:
++        raise ValueError(f"invalid percentage: {value!r}") from None
++    if not pct.is_finite() or pct < 0:
++        raise ValueError(f"percentage must be a finite number >= 0: {value!r}")
++    return pct
++
++
+ @dataclass
+ class Order:
+     items: list[Item] = field(default_factory=list)
++    service: Decimal = Decimal("0")
++
++    def __post_init__(self) -> None:
++        self.service = parse_percent(self.service)
+ 
+     def add(self, person: str, name: str, price: Decimal | str, tags: tuple[str, ...] = ()) -> Item:
+         item = Item(person=person.strip(), name=name.strip(), price=money(price), tags=frozenset(t.strip().lower() for t in tags if t.strip()))
+@@ -35,12 +50,32 @@ class Order:
+     def subtotal(self) -> Decimal:
+         return sum((i.price for i in self.items), Decimal("0.00"))
+ 
++    def service_charge(self) -> Decimal:
++        return money(self.subtotal() * parse_percent(self.service) / 100)
++
+     def total(self) -> Decimal:
+-        return self.subtotal()
++        return self.subtotal() + self.service_charge()
+ 
+     def per_person(self) -> dict[str, Decimal]:
+-        """Each person pays for their own items."""
++        """Each person pays for their own items plus a proportional share of the service charge.
++
++        Pennies of the charge are allocated by largest remainder (ties: sorted name),
++        so the amounts always add up exactly to total().
++        """
+         owed = {p: Decimal("0.00") for p in self.people()}
+         for i in self.items:
+             owed[i.person] += i.price
+-        return owed
++        charge = self.service_charge()
++        subtotal = self.subtotal()
++        if charge == 0 or subtotal == 0:
++            return owed
++
++        charge_pennies = int(charge / PENNY)
++        base_pennies = {p: int(a / PENNY) for p, a in owed.items()}
++        sub_pennies = sum(base_pennies.values())
++        shares = {p: (charge_pennies * b) // sub_pennies for p, b in base_pennies.items()}
++        remainders = {p: (charge_pennies * b) % sub_pennies for p, b in base_pennies.items()}
++        leftover = charge_pennies - sum(shares.values())
++        for p in sorted(owed, key=lambda p: (-remainders[p], p))[:leftover]:
++            shares[p] += 1
++        return {p: owed[p] + Decimal(shares[p]) * PENNY for p in owed}
+diff --git a/tests/test_cli.py b/tests/test_cli.py
+index 0153ccb..c34c7ae 100644
+--- a/tests/test_cli.py
++++ b/tests/test_cli.py
+@@ -1,8 +1,10 @@
++import contextlib
++import io
+ import tempfile
+ import unittest
+ from pathlib import Path
+ 
+-from lunchbox.cli import load, render
++from lunchbox.cli import load, main, render
+ 
+ CSV = """person,item,price,tags
+ Ada,Falafel wrap,7.50,vegan
+@@ -22,6 +24,54 @@ class CliTest(unittest.TestCase):
+         self.assertIn("TOTAL", out)
+         self.assertTrue(out.strip().endswith("19.65"))
+ 
++    def run_cli(self, *args):
++        out, err = io.StringIO(), io.StringIO()
++        with tempfile.TemporaryDirectory() as d:
++            path = Path(d) / "order.csv"
++            path.write_text(CSV)
++            argv = [a.replace("FILE", str(path)) for a in args]
++            with contextlib.redirect_stdout(out), contextlib.redirect_stderr(err):
++                try:
++                    code = main(argv)
++                except SystemExit as e:
++                    code = e.code
++        return code, out.getvalue(), err.getvalue()
++
++    def test_no_service_output_is_unchanged(self):
++        code, out, _ = self.run_cli("FILE")
++        self.assertEqual(code, 0)
++        self.assertEqual(out.splitlines(), [
++            "person          owes",
++            "Ada             9.70",
++            "Grace           9.95",
++            "TOTAL          19.65",
++        ])
++
++    def test_service_flag_shares_charge_and_totals(self):
++        for args in (("FILE", "--service", "12.5"), ("--service", "12.5", "FILE")):
++            with self.subTest(args=args):
++                code, out, _ = self.run_cli(*args)
++                self.assertEqual(code, 0)
++                self.assertEqual(out.splitlines(), [
++                    "person          owes",
++                    "Ada            10.91",
++                    "Grace          11.20",
++                    "TOTAL          22.11",
++                ])
++
++    def test_service_zero_is_accepted(self):
++        code, out, _ = self.run_cli("FILE", "--service", "0")
++        self.assertEqual(code, 0)
++        self.assertTrue(out.strip().endswith("19.65"))
++
++    def test_invalid_service_is_rejected_on_stderr(self):
++        for bad in ("-5", "abc", "nan", "inf"):
++            with self.subTest(bad=bad):
++                code, out, err = self.run_cli("FILE", "--service", bad)
++                self.assertNotEqual(code, 0)
++                self.assertEqual(out, "")
++                self.assertIn("--service", err)
++
+ 
+ if __name__ == "__main__":
+     unittest.main()
+diff --git a/tests/test_orders.py b/tests/test_orders.py
+index 2c55573..59ac0fb 100644
+--- a/tests/test_orders.py
++++ b/tests/test_orders.py
+@@ -30,5 +30,61 @@ class OrderTest(unittest.TestCase):
+         self.assertEqual(self.order.people(), ["Ada", "Grace"])
+ 
+ 
++class ServiceChargeTest(unittest.TestCase):
++    def setUp(self):
++        self.order = Order(service="12.5")
++        self.order.add("Ada", "Falafel wrap", "7.50")
++        self.order.add("Grace", "Chicken katsu", "9.95")
++        self.order.add("Ada", "Lemonade", "2.20")
++
++    def test_default_service_is_zero(self):
++        order = Order()
++        self.assertEqual(order.service, Decimal("0"))
++        order.add("Ada", "Soup", "4.00")
++        self.assertEqual(order.total(), order.subtotal())
++        self.assertEqual(order.per_person(), {"Ada": Decimal("4.00")})
++
++    def test_total_includes_service_rounded_half_up(self):
++        self.assertEqual(self.order.total(), Decimal("22.11"))
++
++    def test_service_is_shared_in_proportion(self):
++        self.assertEqual(self.order.per_person(), {"Ada": Decimal("10.91"), "Grace": Decimal("11.20")})
++
++    def test_per_person_amounts_have_two_decimal_places(self):
++        for amount in self.order.per_person().values():
++            self.assertIsInstance(amount, Decimal)
++            self.assertEqual(amount.as_tuple().exponent, -2)
++
++    def test_pennies_always_add_up_exactly(self):
++        prices = ["3.33", "1.01", "7.77", "0.99", "4.51", "2.02", "9.99"]
++        for pct in ("12.5", "10", "0", "7.5", "100", "133.333"):
++            order = Order(service=pct)
++            for n, price in enumerate(prices):
++                order.add(f"P{n % 5}", "thing", price)
++            with self.subTest(pct=pct):
++                self.assertEqual(sum(order.per_person().values()), order.total())
++
++    def test_leftover_pennies_break_ties_by_name(self):
++        order = Order(service="50")
++        for name in ("Cy", "Bo", "Al"):
++            order.add(name, "thing", "0.01")
++        # charge rounds to 0.02 and the three remainders tie, so the first two names get a penny
++        self.assertEqual(
++            order.per_person(),
++            {"Al": Decimal("0.02"), "Bo": Decimal("0.02"), "Cy": Decimal("0.01")},
++        )
++
++    def test_zero_subtotal_does_not_divide_by_zero(self):
++        order = Order(service="12.5")
++        order.add("Ada", "Water", "0.00")
++        self.assertEqual(order.per_person(), {"Ada": Decimal("0.00")})
++        self.assertEqual(order.total(), Decimal("0.00"))
++
++    def test_invalid_service_raises_value_error(self):
++        for bad in ("-5", "abc", "nan", "inf", "-inf", ""):
++            with self.subTest(bad=bad), self.assertRaises(ValueError):
++                Order(service=bad)
++
++
+ if __name__ == "__main__":
+     unittest.main()
