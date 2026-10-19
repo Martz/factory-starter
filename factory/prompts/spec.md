@@ -13,7 +13,7 @@ Reply in Markdown with exactly these sections:
 One or two sentences.
 
 ## Acceptance criteria
-A numbered list. Each criterion must be observable and testable (inputs → expected outputs). Include criteria implied by the AGENTS.md rules when they apply (for example: money rounding, totals adding up, error handling).
+A numbered list of 3 to 7 criteria. Each one must be observable and testable (inputs → expected outputs); group related edge cases into one criterion rather than listing each separately. Include criteria implied by the AGENTS.md rules when they apply (for example: money rounding, totals adding up, error handling).
 
 ## Plan
 Files to change and the approach, as a short bullet list.
