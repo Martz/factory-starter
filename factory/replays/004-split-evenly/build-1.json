@@ -1,0 +1,11 @@
+{
+ "agent": "copilot",
+ "seconds": 27.7,
+ "text": "- `lunchbox/orders.py`: added `Order.split_evenly()`. It uses integer-cent arithmetic, so the shares always add up to the total. Leftover pennies go to the first people alphabetically, and an empty order returns `{}`.\n- `lunchbox/cli.py`: added `--split-evenly`, and `render(order, split_evenly=False)` now chooses between `split_evenly()` and `per_person()`. Without the flag the output is unchanged.\n- `tests/test_orders.py`: added `SplitEvenlyTest`. It covers remainders, exact division, a single person, an empty order, multiple items per person, the `friday.csv` example and a sum-to-total check over many cases.\n- `tests/test_cli.py`: added tests for the flag on the Friday order, unchanged output without the flag, an empty order and total equals sum of rows.\n- All 19 tests pass, and `python -m lunchbox friday.csv --split-evenly` gives 11.03, 11.03, 11.02, 11.02 with `TOTAL` 44.10. I left `README.md` alone because it doesn't document the lunchbox CLI.",
+ "usage": {
+  "premium_requests": 1,
+  "tokens_in": 152749,
+  "tokens_out": 3793,
+  "models": "claude-sonnet-5.5"
+ }
+}

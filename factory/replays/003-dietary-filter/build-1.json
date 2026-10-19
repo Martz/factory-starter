@@ -1,0 +1,11 @@
+{
+ "agent": "copilot",
+ "seconds": 30.4,
+ "text": "I added `--only TAG` to the CLI, and the full test suite passes (16 tests).\n\n- **`lunchbox/orders.py`:** new `Order.with_tag(tag)` trims and lowercases the tag, then returns the matching items in CSV order.\n- **`lunchbox/cli.py`:**\n  - `--only TAG` prints a `person` / `item` / `price` table instead of the bill. The table ends with a `TOTAL` line, computed with `Decimal` and `money()`. On `friday.csv`, `--only vegan` gives Ada's two items and `TOTAL 9.70`.\n  - If nothing matches, it prints `no items tagged TAG` with the tag as typed (trimmed) and exits 0.\n  - I updated the module docstring. A missing `--only` value is rejected by argparse as before.\n- **Missing CSV:** this now prints `lunchbox: cannot read \u2026` to stderr and exits 1, instead of a traceback. This also changes the path without `--only`.\n- **Tests:** new tests in `tests/test_cli.py` and `tests/test_orders.py` cover each acceptance criterion.\n- **Open questions:** I assumed the table includes a `TOTAL` line and that the tag is echoed as typed in the no-match message. I did not edit `README.md`, so `--only` is only mentioned in the CLI help and docstring.",
+ "usage": {
+  "premium_requests": 1,
+  "tokens_in": 155315,
+  "tokens_out": 4141,
+  "models": "claude-sonnet-5.5"
+ }
+}

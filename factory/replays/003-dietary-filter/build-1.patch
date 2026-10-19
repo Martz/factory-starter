@@ -1,0 +1,202 @@
+diff --git a/lunchbox/cli.py b/lunchbox/cli.py
+index 5253990..74022ca 100644
+--- a/lunchbox/cli.py
++++ b/lunchbox/cli.py
+@@ -1,4 +1,7 @@
+-"""Command line: python -m lunchbox ORDER.csv
++"""Command line: python -m lunchbox ORDER.csv [--only TAG]
++
++--only TAG lists just the items with that dietary tag (case-insensitive)
++instead of the bill.
+ 
+ CSV columns: person,item,price[,tags]   (tags separated by ';', e.g. "vegan;gf")
+ """
+@@ -7,9 +10,10 @@ from __future__ import annotations
+ import argparse
+ import csv
+ import sys
++from decimal import Decimal
+ from pathlib import Path
+ 
+-from .orders import Order
++from .orders import Item, Order, money
+ 
+ 
+ def load(path: Path) -> Order:
+@@ -29,11 +33,33 @@ def render(order: Order) -> str:
+     return "\n".join(lines)
+ 
+ 
++def render_items(items: list[Item]) -> str:
++    pw = max([len("person"), len("TOTAL")] + [len(i.person) for i in items]) + 2
++    iw = max([len("item")] + [len(i.name) for i in items]) + 2
++    lines = [f"{'person':<{pw}}{'item':<{iw}}{'price':>8}"]
++    for i in items:
++        lines.append(f"{i.person:<{pw}}{i.name:<{iw}}{i.price:>8}")
++    total = money(sum((i.price for i in items), Decimal("0.00")))
++    lines.append(f"{'TOTAL':<{pw}}{'':<{iw}}{total:>8}")
++    return "\n".join(lines)
++
++
+ def main(argv: list[str] | None = None) -> int:
+     ap = argparse.ArgumentParser(prog="lunchbox", description="Split a group lunch order.")
+     ap.add_argument("order", type=Path, help="CSV file: person,item,price[,tags]")
++    ap.add_argument("--only", metavar="TAG", help="list only items with this dietary tag (case-insensitive)")
+     args = ap.parse_args(argv)
+-    print(render(load(args.order)))
++    try:
++        order = load(args.order)
++    except OSError as e:
++        print(f"lunchbox: cannot read {args.order}: {e.strerror or e}", file=sys.stderr)
++        return 1
++    if args.only is None:
++        print(render(order))
++        return 0
++    tag = args.only.strip()
++    items = order.with_tag(tag)
++    print(render_items(items) if items else f"no items tagged {tag}")
+     return 0
+ 
+ 
+diff --git a/lunchbox/orders.py b/lunchbox/orders.py
+index b0a78e8..de8eb62 100644
+--- a/lunchbox/orders.py
++++ b/lunchbox/orders.py
+@@ -38,6 +38,11 @@ class Order:
+     def total(self) -> Decimal:
+         return self.subtotal()
+ 
++    def with_tag(self, tag: str) -> list[Item]:
++        """Items carrying the dietary tag (case-insensitive), in order."""
++        tag = tag.strip().lower()
++        return [i for i in self.items if tag in i.tags]
++
+     def per_person(self) -> dict[str, Decimal]:
+         """Each person pays for their own items."""
+         owed = {p: Decimal("0.00") for p in self.people()}
+diff --git a/tests/test_cli.py b/tests/test_cli.py
+index 0153ccb..9da3155 100644
+--- a/tests/test_cli.py
++++ b/tests/test_cli.py
+@@ -1,8 +1,10 @@
++import contextlib
++import io
+ import tempfile
+ import unittest
+ from pathlib import Path
+ 
+-from lunchbox.cli import load, render
++from lunchbox.cli import load, main, render
+ 
+ CSV = """person,item,price,tags
+ Ada,Falafel wrap,7.50,vegan
+@@ -23,5 +25,92 @@ class CliTest(unittest.TestCase):
+         self.assertTrue(out.strip().endswith("19.65"))
+ 
+ 
++FRIDAY = """person,item,price,tags
++Ada,Falafel wrap,7.50,vegan
++Grace,Chicken katsu,9.95,
++Linus,Ramen,11.40,
++Margaret,Halloumi salad,8.25,veggie;gf
++Ada,Lemonade,2.20,Vegan;GF
++Linus,Gyoza,4.80,
++"""
++
++
++def run_cli(csv_text, *args, name="order.csv", write=True):
++    with tempfile.TemporaryDirectory() as d:
++        path = Path(d) / name
++        if write:
++            path.write_text(csv_text)
++        out, err = io.StringIO(), io.StringIO()
++        with contextlib.redirect_stdout(out), contextlib.redirect_stderr(err):
++            try:
++                code = main([str(path), *args])
++            except SystemExit as e:
++                code = e.code
++    return code, out.getvalue(), err.getvalue()
++
++
++class OnlyTest(unittest.TestCase):
++    def test_only_lists_matching_items_in_order(self):
++        code, out, err = run_cli(FRIDAY, "--only", "vegan")
++        lines = out.splitlines()
++        self.assertEqual(code, 0)
++        self.assertEqual(err, "")
++        self.assertEqual(lines[0].split(), ["person", "item", "price"])
++        self.assertEqual(lines[1].split(), ["Ada", "Falafel", "wrap", "7.50"])
++        self.assertEqual(lines[2].split(), ["Ada", "Lemonade", "2.20"])
++        self.assertEqual(len(lines), 4)
++        self.assertNotIn("owes", out)
++        for name in ("Grace", "Linus", "Margaret"):
++            self.assertNotIn(name, out)
++
++    def test_only_matches_any_of_several_tags(self):
++        _, out, _ = run_cli(FRIDAY, "--only", "gf")
++        self.assertIn("Lemonade", out)
++        self.assertIn("Halloumi salad", out)
++        self.assertNotIn("Falafel", out)
++
++    def test_only_is_case_and_whitespace_insensitive(self):
++        outs = {run_cli(FRIDAY, "--only", t)[1] for t in ("vegan", "VEGAN", "Vegan", "  vegan ")}
++        self.assertEqual(len(outs), 1)
++        self.assertIn("Lemonade", outs.pop())
++
++    def test_only_total_is_exact_sum_with_two_decimals(self):
++        _, out, _ = run_cli(FRIDAY, "--only", "vegan")
++        last = out.splitlines()[-1].split()
++        self.assertEqual(last, ["TOTAL", "9.70"])
++        _, out, _ = run_cli("person,item,price,tags\nAda,Tea,2.5,vegan\n", "--only", "vegan")
++        self.assertEqual(out.splitlines()[1].split(), ["Ada", "Tea", "2.50"])
++        _, out, _ = run_cli("person,item,price,tags\n" + "Ada,Tea,0.10,vegan\n" * 3, "--only", "vegan")
++        self.assertEqual(out.splitlines()[-1].split(), ["TOTAL", "0.30"])
++
++    def test_only_no_match_prints_message(self):
++        code, out, err = run_cli(FRIDAY, "--only", "keto")
++        self.assertEqual((code, out, err), (0, "no items tagged keto\n", ""))
++
++    def test_only_no_match_when_order_has_no_tags(self):
++        code, out, err = run_cli("person,item,price\nAda,Tea,2.00\n", "--only", "vegan")
++        self.assertEqual((code, out, err), (0, "no items tagged vegan\n", ""))
++
++    def test_without_only_output_is_the_bill(self):
++        code, out, err = run_cli(FRIDAY)
++        self.assertEqual(code, 0)
++        self.assertEqual(err, "")
++        self.assertEqual(out.splitlines()[0].split(), ["person", "owes"])
++        self.assertTrue(out.strip().endswith("44.10"))
++
++    def test_missing_file_fails_on_stderr(self):
++        code, out, err = run_cli("", "--only", "vegan", name="nope.csv", write=False)
++        self.assertNotEqual(code, 0)
++        self.assertEqual(out, "")
++        self.assertNotIn("Traceback", err)
++        self.assertTrue(err.strip())
++
++    def test_missing_only_value_fails_on_stderr(self):
++        code, out, err = run_cli(FRIDAY, "--only")
++        self.assertNotEqual(code, 0)
++        self.assertEqual(out, "")
++        self.assertIn("--only", err)
++
++
+ if __name__ == "__main__":
+     unittest.main()
+diff --git a/tests/test_orders.py b/tests/test_orders.py
+index 2c55573..93aea65 100644
+--- a/tests/test_orders.py
++++ b/tests/test_orders.py
+@@ -29,6 +29,12 @@ class OrderTest(unittest.TestCase):
+     def test_people_are_sorted(self):
+         self.assertEqual(self.order.people(), ["Ada", "Grace"])
+ 
++    def test_with_tag_filters_case_insensitively_in_order(self):
++        names = [i.name for i in self.order.with_tag(" VEGAN ")]
++        self.assertEqual(names, ["Falafel wrap", "Lemonade"])
++        self.assertEqual([i.name for i in self.order.with_tag("gf")], ["Lemonade"])
++        self.assertEqual(self.order.with_tag("keto"), [])
++
+ 
+ if __name__ == "__main__":
+     unittest.main()

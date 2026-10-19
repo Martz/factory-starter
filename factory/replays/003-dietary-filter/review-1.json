@@ -1,0 +1,8 @@
+{
+ "agent": "codex",
+ "seconds": 15.5,
+ "text": "{\"verdict\":\"approve\",\"criteria\":[{\"id\":1,\"met\":true,\"evidence\":\"tests/test_cli.py:53-64 checks matching rows, order, excluded people, and no bill; lunchbox/cli.py:36-44 renders the item table.\"},{\"id\":2,\"met\":true,\"evidence\":\"tests/test_cli.py:72-75 checks case and whitespace variants; tests/test_orders.py:32-36 checks normalized tags and filtering.\"},{\"id\":3,\"met\":true,\"evidence\":\"tests/test_cli.py:86-92 checks the exact no-match output, exit code, and empty stderr, including an order without tags.\"},{\"id\":4,\"met\":true,\"evidence\":\"tests/test_cli.py:77-84 checks the 9.70 total, two-decimal display, and exact decimal addition; lunchbox/cli.py:42-43 sums Decimal prices.\"},{\"id\":5,\"met\":true,\"evidence\":\"tests/test_cli.py:94-112 checks default bill output and missing-file/argument errors; lunchbox/cli.py:52-63 handles file errors and leaves the default render path intact.\"},{\"id\":6,\"met\":true,\"evidence\":\"tests/test_cli.py:52-112 adds coverage for the requested behaviors; tests/test_orders.py:32-36 adds helper coverage. No existing test was removed or weakened in the supplied diff.\"}],\"findings\":[],\"summary\":\"The change implements the filtered listing, tag matching, totals, and error behavior without unrelated changes or rule violations; the test run was blocked by the read-only environment preventing temporary directory creation.\"}",
+ "usage": {
+  "tokens": 30573
+ }
+}

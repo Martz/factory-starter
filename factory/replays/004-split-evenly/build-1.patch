@@ -1,0 +1,195 @@
+diff --git a/lunchbox/cli.py b/lunchbox/cli.py
+index 5253990..e96fe6d 100644
+--- a/lunchbox/cli.py
++++ b/lunchbox/cli.py
+@@ -21,9 +21,10 @@ def load(path: Path) -> Order:
+     return order
+ 
+ 
+-def render(order: Order) -> str:
++def render(order: Order, split_evenly: bool = False) -> str:
+     lines = [f"{'person':<12}{'owes':>8}"]
+-    for person, amount in order.per_person().items():
++    shares = order.split_evenly() if split_evenly else order.per_person()
++    for person, amount in shares.items():
+         lines.append(f"{person:<12}{amount:>8}")
+     lines.append(f"{'TOTAL':<12}{order.total():>8}")
+     return "\n".join(lines)
+@@ -32,8 +33,9 @@ def render(order: Order) -> str:
+ def main(argv: list[str] | None = None) -> int:
+     ap = argparse.ArgumentParser(prog="lunchbox", description="Split a group lunch order.")
+     ap.add_argument("order", type=Path, help="CSV file: person,item,price[,tags]")
++    ap.add_argument("--split-evenly", action="store_true", help="split the total equally instead of by what each person ordered")
+     args = ap.parse_args(argv)
+-    print(render(load(args.order)))
++    print(render(load(args.order), split_evenly=args.split_evenly))
+     return 0
+ 
+ 
+diff --git a/lunchbox/orders.py b/lunchbox/orders.py
+index b0a78e8..70fec65 100644
+--- a/lunchbox/orders.py
++++ b/lunchbox/orders.py
+@@ -44,3 +44,12 @@ class Order:
+         for i in self.items:
+             owed[i.person] += i.price
+         return owed
++
++    def split_evenly(self) -> dict[str, Decimal]:
++        """Equal share of the total each; leftover pennies go one each in alphabetical order."""
++        people = self.people()
++        if not people:
++            return {}
++        cents = int(self.total() / PENNY)
++        base, rem = divmod(cents, len(people))
++        return {p: (base + (1 if i < rem else 0)) * PENNY for i, p in enumerate(people)}
+diff --git a/tests/test_cli.py b/tests/test_cli.py
+index 0153ccb..b93b0ea 100644
+--- a/tests/test_cli.py
++++ b/tests/test_cli.py
+@@ -1,8 +1,12 @@
++import contextlib
++import io
+ import tempfile
+ import unittest
++from decimal import Decimal
+ from pathlib import Path
+ 
+-from lunchbox.cli import load, render
++from lunchbox import Order
++from lunchbox.cli import load, main, render
+ 
+ CSV = """person,item,price,tags
+ Ada,Falafel wrap,7.50,vegan
+@@ -10,6 +14,15 @@ Grace,Chicken katsu,9.95,
+ Ada,Lemonade,2.20,vegan;gf
+ """
+ 
++FRIDAY = """person,item,price,tags
++Ada,Falafel wrap,7.50,vegan
++Grace,Chicken katsu,9.95,
++Linus,Ramen,11.40,
++Margaret,Halloumi salad,8.25,veggie;gf
++Ada,Lemonade,2.20,vegan;gf
++Linus,Gyoza,4.80,
++"""
++
+ 
+ class CliTest(unittest.TestCase):
+     def test_render_shows_each_person_and_total(self):
+@@ -22,6 +35,47 @@ class CliTest(unittest.TestCase):
+         self.assertIn("TOTAL", out)
+         self.assertTrue(out.strip().endswith("19.65"))
+ 
++    def run_cli(self, text, *flags):
++        with tempfile.TemporaryDirectory() as d:
++            path = Path(d) / "order.csv"
++            path.write_text(text)
++            buf = io.StringIO()
++            with contextlib.redirect_stdout(buf):
++                code = main([str(path), *flags])
++        return code, buf.getvalue().splitlines()
++
++    def test_split_evenly_flag_uses_even_shares(self):
++        code, lines = self.run_cli(FRIDAY, "--split-evenly")
++        self.assertEqual(code, 0)
++        self.assertEqual(lines, [
++            f"{'person':<12}{'owes':>8}",
++            f"{'Ada':<12}{'11.03':>8}",
++            f"{'Grace':<12}{'11.03':>8}",
++            f"{'Linus':<12}{'11.02':>8}",
++            f"{'Margaret':<12}{'11.02':>8}",
++            f"{'TOTAL':<12}{'44.10':>8}",
++        ])
++
++    def test_without_flag_output_is_per_person(self):
++        code, lines = self.run_cli(FRIDAY)
++        self.assertEqual(code, 0)
++        self.assertIn(f"{'Ada':<12}{'9.70':>8}", lines)
++        self.assertEqual(lines[-1], f"{'TOTAL':<12}{'44.10':>8}")
++
++    def test_split_evenly_empty_order(self):
++        code, lines = self.run_cli("person,item,price,tags\n", "--split-evenly")
++        self.assertEqual(code, 0)
++        self.assertEqual(lines, [f"{'person':<12}{'owes':>8}", f"{'TOTAL':<12}{'0.00':>8}"])
++
++    def test_render_split_evenly_total_equals_sum_of_rows(self):
++        order = Order()
++        order.add("A", "x", "10.00")
++        order.add("B", "x", "0")
++        order.add("C", "x", "0")
++        lines = render(order, split_evenly=True).splitlines()
++        rows = [Decimal(l[12:].strip()) for l in lines[1:-1]]
++        self.assertEqual(sum(rows), Decimal(lines[-1][12:].strip()))
++
+ 
+ if __name__ == "__main__":
+     unittest.main()
+diff --git a/tests/test_orders.py b/tests/test_orders.py
+index 2c55573..55c38af 100644
+--- a/tests/test_orders.py
++++ b/tests/test_orders.py
+@@ -30,5 +30,63 @@ class OrderTest(unittest.TestCase):
+         self.assertEqual(self.order.people(), ["Ada", "Grace"])
+ 
+ 
++class SplitEvenlyTest(unittest.TestCase):
++    def order_of(self, *prices_by_person):
++        order = Order()
++        for person, price in prices_by_person:
++            order.add(person, "x", price)
++        return order
++
++    def test_remainder_goes_to_first_people_alphabetically(self):
++        order = self.order_of(("C", "10.00"), ("A", "0.00"), ("B", "0.00"))
++        shares = order.split_evenly()
++        self.assertEqual(shares, {"A": Decimal("3.34"), "B": Decimal("3.33"), "C": Decimal("3.33")})
++        self.assertEqual(list(shares), ["A", "B", "C"])
++        self.assertTrue(all(isinstance(v, Decimal) for v in shares.values()))
++
++    def test_two_pennies_left_over(self):
++        order = self.order_of(("C", "10.01"), ("A", "0"), ("B", "0"))
++        self.assertEqual(list(order.split_evenly().values()), [Decimal("3.34"), Decimal("3.34"), Decimal("3.33")])
++
++    def test_penny_split_three_ways(self):
++        order = self.order_of(("A", "0.01"), ("B", "0"), ("C", "0"))
++        self.assertEqual(list(order.split_evenly().values()), [Decimal("0.01"), Decimal("0.00"), Decimal("0.00")])
++
++    def test_exact_division(self):
++        order = self.order_of(("A", "10.00"), ("B", "0"), ("C", "0"), ("D", "0"))
++        self.assertEqual(order.split_evenly(), {p: Decimal("2.50") for p in "ABCD"})
++
++    def test_single_person_pays_everything(self):
++        order = self.order_of(("Ada", "4.20"), ("Ada", "1.11"))
++        self.assertEqual(order.split_evenly(), {"Ada": Decimal("5.31")})
++
++    def test_empty_order(self):
++        self.assertEqual(Order().split_evenly(), {})
++
++    def test_only_people_in_order_count_regardless_of_items(self):
++        order = self.order_of(("Ada", "1.00"), ("Ada", "1.00"), ("Ada", "1.00"), ("Bob", "1.00"))
++        self.assertEqual(order.split_evenly(), {"Ada": Decimal("2.00"), "Bob": Decimal("2.00")})
++
++    def test_friday_example(self):
++        order = Order()
++        for person, price in [("Ada", "7.50"), ("Grace", "9.95"), ("Linus", "11.40"),
++                              ("Margaret", "8.25"), ("Ada", "2.20"), ("Linus", "4.80")]:
++            order.add(person, "x", price)
++        self.assertEqual(order.total(), Decimal("44.10"))
++        self.assertEqual(order.split_evenly(), {
++            "Ada": Decimal("11.03"), "Grace": Decimal("11.03"),
++            "Linus": Decimal("11.02"), "Margaret": Decimal("11.02"),
++        })
++
++    def test_shares_always_sum_to_total(self):
++        for n in range(1, 8):
++            for cents in (0, 1, 7, 999, 1001, 4410):
++                order = Order()
++                for i in range(n):
++                    order.add(f"P{i}", "x", "0")
++                order.add("P0", "y", Decimal(cents) / 100)
++                self.assertEqual(sum(order.split_evenly().values()), order.total())
++
++
+ if __name__ == "__main__":
+     unittest.main()

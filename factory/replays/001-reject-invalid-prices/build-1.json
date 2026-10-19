@@ -1,11 +1,11 @@
 {
  "agent": "copilot",
- "seconds": 31.6,
- "text": "- **`Order.add`** (`lunchbox/orders.py`) now rejects zero, negative, non-finite and non-numeric prices. That covers `None`, `\"\"`, `NaN`, `Infinity`, float nan/inf and `1e999999`. It raises `ValueError` naming the person and item. The check runs on the `money()`-rounded value, so `\"0.004\"` is rejected and `\"0.005\"` is accepted. A rejected add leaves `items` unchanged.\n- **`load`** (`lunchbox/cli.py`) wraps the `ValueError` in a new `RowError` that carries `csv.reader.line_num`. I used `csv.reader` rather than `DictReader` but kept the same blank-row skipping. `main` prints `error: line N: <message>` to stderr, prints no table, and returns 2.\n- **Assumption:** a price that rounds to `0.00` counts as zero and is rejected.\n- **Tests:** added to `tests/test_orders.py` and `tests/test_cli.py` for every criterion, including blank-line and multi-line-field line numbers, first-bad-row-only, and the unchanged valid path. The existing tests are untouched.\n- **Verification:** all 18 tests pass, and `friday.csv` still prints the table ending in `TOTAL` (44.10).",
+ "seconds": 34.3,
+ "text": "My test expectation was wrong (header=1, Ada spans 2\u20133, Grace=4); fixing it.\n\n- **`lunchbox/orders.py`**: `Order.add` now validates the price through a new `_valid_price`. It rejects non-numeric, NaN, infinite and \u2264 0 prices, including ones that round to zero such as `0.004`, with a plain `ValueError`. The message names the person and the item, and nothing is appended on failure. Valid prices still round half-up with `Decimal`.\n- **`lunchbox/cli.py`**: `load` catches the `ValueError` per row and raises a new `RowError` carrying `reader.line_num`. `main` prints `error: line N: <message>` to stderr and returns 2, with nothing on stdout and no traceback. Rows with a missing column are handled the same way.\n- **`tests/test_orders.py`**: new `PriceValidationTest` covers criteria 1\u20133: bad price types, no `InvalidOperation`, order left unchanged, valid prices still accepted, and totals unchanged.\n- **`tests/test_cli.py`**: new `CliErrorTest` covers criteria 4\u20135 with captured stdout and stderr. It checks the return code, the exact stderr line, line numbers after blank lines and after a multi-line quoted field, `load()` surfacing the line number, and a valid CSV still exiting 0.\n- `python3 -m unittest discover -s tests -q` passes (18 tests), and `python3 -m lunchbox friday.csv` still prints the table ending in `TOTAL`. I did not touch `factory/` or `.github/`.",
  "usage": {
   "premium_requests": 1,
-  "tokens_in": 147262,
-  "tokens_out": 4152,
+  "tokens_in": 189884,
+  "tokens_out": 4542,
   "models": "claude-sonnet-5.5"
  }
 }
