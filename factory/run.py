@@ -4,6 +4,7 @@
     python3 factory/run.py run work/001-reject-invalid-prices.md   # run the line on one work item
     python3 factory/run.py run --issue 12 --pr                      # GitHub issue in, draft PR out
     python3 factory/run.py report                                   # metrics across runs
+    python3 factory/run.py show [--diff | --try CMD]                # inspect the latest run
     python3 factory/run.py learn                                    # improvement loop: propose AGENTS.md rules
     python3 factory/run.py doctor [--deep]                          # preflight checks
     python3 factory/run.py reset                                    # remove factory worktrees and branches
@@ -404,6 +405,7 @@ def finish(r: Run, started: float) -> int:
     st = Station("record", "code")
     total = time.time() - started
     row = {"id": r.id, "work": r.stem, "title": r.title, "finished": dt.datetime.now().isoformat(timespec="seconds"),
+           "base": r.base, "branch": f"factory/{r.id}" if shipped else None,
            "outcome": r.outcome, "reason": r.reason, "seconds": round(total, 1), "agents": r.agents,
            "fix_rounds": r.fix_rounds, "review_rounds": r.review_rounds,
            "review_verdict": r.review.get("verdict"), "findings": len(r.review.get("findings") or []),
@@ -513,6 +515,47 @@ def cmd_report(args) -> int:
     return 0
 
 
+def cmd_show(args) -> int:
+    """Show a run (default: the latest): evidence summary, optionally the diff, or try a command on its branch."""
+    rows = [json.loads(line) for line in LEDGER.read_text().splitlines()] if LEDGER.exists() else []
+    if args.run:
+        rows = [x for x in rows if x["id"].startswith(args.run) or args.run in x["id"]]
+    if not rows:
+        print("no matching runs")
+        return 1
+    x = rows[-1]
+    d, wt = STATE / "runs" / x["id"], STATE / "worktrees" / x["id"]
+    if args.diff:
+        if not x.get("base") or not wt.exists():
+            print("no worktree/branch for this run")
+            return 1
+        os.execvp("git", ["git", "-C", str(wt), "-c", "color.ui=always", "--no-pager", "diff", x["base"], "HEAD", "--stat", "-p", "--", "."])
+    if args.try_cmd:
+        print(c(f"$ (on {x.get('branch')}) {args.try_cmd}", DIM), flush=True)
+        return subprocess.run(args.try_cmd, shell=True, cwd=wt).returncode
+    col = GREEN if x["outcome"] == "ready" else YELLOW
+    print(f"\n {c(x['title'], BOLD)}  {c(x['id'], DIM)}")
+    print(f"   outcome   {c(x['outcome'], col)} · {x['reason']}")
+    print(f"   line      " + " · ".join(f"{k}={v}" for k, v in x["agents"].items()))
+    print(f"   time      {fmt_secs(x['seconds'])}  (" + ", ".join(f"{k} {fmt_secs(v)}" for k, v in x["stations"].items() if v >= 1) + ")")
+    print(f"   change    {x['files']} files, +{x['insertions']} −{x['deletions']} on {x.get('branch') or '-'}")
+    print(f"   loops     fix rounds {x['fix_rounds']} · review rounds {x['review_rounds']} · human touches {x['human_touches']}")
+    reviews = sorted(d.glob("review-*.json"))
+    if reviews:
+        v = json.loads(reviews[-1].read_text())
+        print(f"\n   {c('independent review: ' + str(v.get('verdict', '?')).upper(), BOLD)}  {v.get('summary', '')}")
+        for k in v.get("criteria") or []:
+            mark = c("✓", GREEN) if k.get("met") else c("✗", RED)
+            print(f"     {mark} {k.get('id')}: {str(k.get('evidence', ''))[:110]}")
+        for f in v.get("findings") or []:
+            print(f"     {c('•', YELLOW)} {f.get('severity')}: {f.get('issue')}")
+    print(f"\n   evidence  {(d / 'evidence.md').relative_to(ROOT)}")
+    print(f"   spec      {(d / 'spec.md').relative_to(ROOT)}")
+    print(c(f"   next      run.py show --diff · run.py show --try \"python3 -m lunchbox friday.csv\"", DIM))
+    print()
+    return 0
+
+
 def cmd_learn(args) -> int:
     """The improvement loop: mine recent runs and propose AGENTS.md rules (a human decides)."""
     cfg = load_config()
@@ -602,6 +645,10 @@ def main() -> int:
     p.add_argument("--pr", action="store_true", help="push the branch and open a PR with the evidence (needs gh)")
     p.add_argument("--record", action="store_true", help="save agent outputs to factory/replays/ for --agent replay")
     sub.add_parser("report", help="metrics across runs")
+    p_show = sub.add_parser("show", help="show a run (default: latest): evidence summary, --diff, or --try CMD")
+    p_show.add_argument("run", nargs="?", help="run id or part of it")
+    p_show.add_argument("--diff", action="store_true", help="show the change")
+    p_show.add_argument("--try", dest="try_cmd", metavar="CMD", help="run a command on the run's branch (in its worktree)")
     p_learn = sub.add_parser("learn", help="improvement loop: propose AGENTS.md rules from recent runs")
     p_learn.add_argument("--last", type=int, default=10)
     p_learn.add_argument("--agent", choices=agents.ADAPTERS)
@@ -614,7 +661,7 @@ def main() -> int:
         if not args.work and not args.issue:
             ap.error("run needs a work item file or --issue N")
         STATE.mkdir(exist_ok=True)
-    return {"run": cmd_run, "report": cmd_report, "learn": cmd_learn, "doctor": cmd_doctor, "reset": cmd_reset}[args.cmd](args)
+    return {"run": cmd_run, "report": cmd_report, "show": cmd_show, "learn": cmd_learn, "doctor": cmd_doctor, "reset": cmd_reset}[args.cmd](args)
 
 
 if __name__ == "__main__":

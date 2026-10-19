@@ -15,6 +15,8 @@ A work item goes in. Agents write a spec, build the change and review it indepen
 
 **Agents propose, code disposes.** Agents do the creative work (spec, build, review). A plain Python script owns the control flow, the gates, the evidence and the record, so the parts that must always happen don't depend on a model remembering to do them.
 
+> Companion to the talk *Software Factories: from driving an agent to designing the line*. **Glossary, metrics and references: [docs/GLOSSARY.md](docs/GLOSSARY.md).**
+
 ## Quick start
 
 You need Python 3.11+, git, and at least one coding-agent CLI that is logged in:
@@ -27,6 +29,7 @@ python3 factory/run.py doctor --deep          # preflight: tools, auth, gates gr
 python3 factory/run.py run work/001-reject-invalid-prices.md
 python3 factory/run.py run work/002-service-charge.md --checkpoint spec   # pause for a human to approve the spec
 python3 factory/run.py report                 # lead time, autonomy, fix rounds, spend
+python3 factory/run.py show [--diff | --try "python3 -m lunchbox friday.csv"]   # inspect the latest run
 ```
 
 By default the build agent is Copilot and the reviewer is Codex (`factory/factory.toml`). With only one agent installed, use it for everything:
