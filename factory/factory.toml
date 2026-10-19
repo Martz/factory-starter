@@ -1,0 +1,37 @@
+# Factory-as-code: the production line, versioned and reviewed with the product.
+# Change it through a PR like any other code. Every run records which config it used.
+
+[factory]
+name = "lunchbox-factory"
+
+[agents]
+# Which coding-agent CLI runs each station: copilot | claude | codex | pi | replay
+# Using a different agent for review gives an independent reviewer (another vendor, a fresh context).
+spec   = "copilot"
+build  = "copilot"
+review = "codex"
+learn  = "copilot"
+
+[models]
+# Optional model per station; "" means the agent's default.
+spec   = ""
+build  = ""
+review = ""
+learn  = ""
+
+[gates]
+# Computational sensors. The factory runs these itself after every build, outside the agent.
+# Each must exit 0. {python} is replaced with the current Python interpreter.
+test    = "{python} -m unittest discover -s tests -q"
+compile = "{python} -m compileall -q lunchbox"
+# Built-in sensor: fail if any existing test_* function disappeared (guards against "fixing" by deleting tests).
+tests_kept = "builtin"
+
+[limits]
+fix_rounds    = 2    # gate failures fed back to the build agent (Stripe minions: "at most two" CI rounds)
+review_rounds = 1    # reviewer "changes" verdicts sent back for one revision
+agent_timeout = 600  # seconds per agent call
+
+[checkpoints]
+# Where a human must say yes. Merging is always human.
+spec = false         # true (or --checkpoint spec) = pause for approval before building
