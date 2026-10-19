@@ -10,6 +10,7 @@ Adapters: copilot (GitHub Copilot CLI), claude (Claude Code), codex (OpenAI Code
 from __future__ import annotations
 
 import json
+import os
 import re
 import shutil
 import subprocess
@@ -154,7 +155,9 @@ def _replay(call: Call) -> AgentResult:
     if not call.replay_dir or not (call.replay_dir / f"{call.replay_key}.json").exists():
         return AgentResult(text="", ok=False, seconds=0, error=f"no recording for {call.replay_key} in {call.replay_dir}")
     rec = json.loads((call.replay_dir / f"{call.replay_key}.json").read_text())
-    time.sleep(min(3.0, max(0.8, rec.get("seconds", 1) / 30)))
+    # Pace: 1/FACTORY_REPLAY_SPEED of the recorded time (default 6x faster), between 1 and 10 seconds.
+    speed = float(os.environ.get("FACTORY_REPLAY_SPEED", "6"))
+    time.sleep(min(10.0, max(1.0, rec.get("seconds", 1) / speed)))
     patch = call.replay_dir / f"{call.replay_key}.patch"
     if call.write and patch.exists():
         # Recorded patches are cumulative from the base commit: reset, then apply.
