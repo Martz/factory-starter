@@ -1,0 +1,68 @@
+# The "walk" stage: the same factory, triggered by work arriving in GitHub instead of a laptop.
+# Label an issue `factory` → the line runs in Actions → a PR with the evidence appears → a human reviews and merges.
+#
+# Setup (once):
+#   1. Create a label named `factory`. Only people with triage rights can apply labels, which is your
+#      first guard against untrusted issue text (prompt injection: see the "lethal trifecta").
+#   2. Add a repository secret COPILOT_TOKEN: a fine-grained personal access token with the
+#      "Copilot Requests" permission (Copilot CLI reads it from COPILOT_GITHUB_TOKEN).
+#   3. Settings → Actions → General → allow GitHub Actions to create pull requests.
+# To use another agent instead, install its CLI below, pass its key as a secret, and run with --agent.
+name: factory
+on:
+  issues:
+    types: [labeled]
+
+permissions:
+  contents: write
+  pull-requests: write
+  issues: write
+
+concurrency:
+  group: factory-${{ github.event.issue.number }}
+  cancel-in-progress: false
+
+jobs:
+  run:
+    if: github.event.label.name == 'factory'
+    runs-on: ubuntu-latest
+    timeout-minutes: 40
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+      - name: Install agent CLIs
+        run: npm install -g @github/copilot
+      - name: Run the factory on this issue
+        env:
+          COPILOT_GITHUB_TOKEN: ${{ secrets.COPILOT_TOKEN }}
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          git config user.name "factory[bot]"
+          git config user.email "factory-bot@users.noreply.github.com"
+          # Review with Copilot too here (one secret). Locally the default reviewer is Codex, a different vendor.
+          python factory/run.py run --issue ${{ github.event.issue.number }} --agent copilot --pr
+      - name: Report back on the issue
+        if: always()
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          run_dir=$(ls -td .factory/runs/*/ 2>/dev/null | head -1)
+          if [ -n "$run_dir" ] && [ -f "$run_dir/evidence.md" ]; then
+            gh issue comment ${{ github.event.issue.number }} --body-file "$run_dir/evidence.md"
+          else
+            gh issue comment ${{ github.event.issue.number }} --body "The factory run failed before producing evidence. See the Actions log: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}"
+          fi
+      - name: Keep the run record
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: factory-run-${{ github.event.issue.number }}
+          path: .factory/runs/
+          include-hidden-files: true
