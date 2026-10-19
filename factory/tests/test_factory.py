@@ -6,6 +6,7 @@ model calls. Factories are software too: test them, version them, review changes
 """
 import json
 import os
+import shutil
 import subprocess
 import sys
 import tempfile
@@ -29,6 +30,9 @@ class FactoryFlowTest(unittest.TestCase):
         git("clone", "-q", str(ROOT), str(self.repo), cwd=ROOT)
         git("config", "user.email", "test@example.com", cwd=self.repo)
         git("config", "user.name", "factory test", cwd=self.repo)
+        # Test the factory code on disk (including uncommitted edits), not just what is committed.
+        shutil.copytree(ROOT / "factory", self.repo / "factory", dirs_exist_ok=True,
+                        ignore=shutil.ignore_patterns("replays", "__pycache__", "tests"))
         (self.repo / "work").mkdir(exist_ok=True)
         (self.repo / "work" / "999-selftest.md").write_text("# Self-test\n\nAdd `answer()` returning 42.\n")
         self.replays = self.repo / "factory" / "replays" / "999-selftest"
@@ -40,6 +44,9 @@ class FactoryFlowTest(unittest.TestCase):
     def patch_for(self, value: int) -> str:
         """A cumulative patch (base → change) that adds selftest.py returning `value`, plus its test."""
         scratch = Path(self.tmp.name) / f"scratch-{value}"
+        if scratch.exists():
+            git("add", "-A", cwd=scratch)
+            return git("diff", "--cached", cwd=scratch)
         git("clone", "-q", str(self.repo), str(scratch), cwd=self.repo)
         (scratch / "lunchbox" / "selftest.py").write_text(CODE.format(value=value))
         (scratch / "tests" / "test_selftest.py").write_text(TEST)

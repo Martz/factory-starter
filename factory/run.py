@@ -113,7 +113,8 @@ def test_names(tree: Path) -> set[str]:
 
 def test_names_at(rev: str) -> set[str]:
     """test_* functions at a git revision (the base the factory started from)."""
-    out = sh(["git", "grep", "-n", "-E", r"^\s*def test_\w+", rev, "--", "tests/"], ROOT, check=False).stdout
+    # POSIX classes, not \s or \w: git grep -E does not support them everywhere (silently matches nothing).
+    out = sh(["git", "grep", "-n", "-E", r"^[[:space:]]*def test_[A-Za-z0-9_]+", rev, "--", "tests/"], ROOT, check=False).stdout
     names = set()
     for line in out.splitlines():
         _, path, _, code = line.split(":", 3)            # <rev>:tests/test_x.py:12:    def test_y(self):
@@ -224,8 +225,9 @@ class Run:
         out, ok_all, summary = [], True, []
         for name, cmd in self.cfg.get("gates", {}).items():
             if cmd == "builtin" and name == "tests_kept":
-                missing = sorted(test_names_at(self.base) - test_names(self.wt))
-                ok = not missing
+                before, after = test_names_at(self.base), test_names(self.wt)
+                missing = sorted(before - after)
+                ok = not missing and (bool(before) or not after)   # fail closed if the sensor itself sees nothing
                 out.append(f"[{name}] {'ok' if ok else 'removed tests: ' + ', '.join(missing)}")
             else:
                 cmd = cmd.replace("{python}", shlex.quote(sys.executable))
@@ -293,7 +295,10 @@ def _line(r: Run, args):
 
     if cfg.get("checkpoints", {}).get("spec"):
         st = Station("approve", "human", number=False)
-        print("\n" + "\n".join("      " + c(line, DIM) for line in r.spec.strip().splitlines()) + "\n")
+        m = re.search(r"##\s*Acceptance criteria\s*\n(.*?)(\n##\s|\Z)", r.spec, re.S | re.I)
+        shown = (m.group(1).strip() if m else r.spec.strip()).splitlines()
+        print("\n      " + c("Acceptance criteria (full spec: " + str((r.dir / "spec.md").relative_to(ROOT)) + ")", BOLD))
+        print("\n".join("      " + line for line in shown) + "\n")
         answer = input(f"      {c('◆ Approve this spec? [y/N] ', MAGENTA)}").strip().lower()
         r.human_touches += 1
         if answer not in ("y", "yes"):
