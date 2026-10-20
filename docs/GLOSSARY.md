@@ -31,6 +31,9 @@ This is the companion to the talk *Software Factories: from driving an agent to 
 | **Agent Skills** | "A lightweight, open format for extending AI agent capabilities with specialized knowledge and workflows": a folder containing `SKILL.md`. | [agentskills.io](https://agentskills.io/) |
 | **MCP** | Model Context Protocol: an open protocol for connecting agents to tools and data. | [modelcontextprotocol.io](https://modelcontextprotocol.io/) |
 | **Lethal trifecta** | Access to private data + exposure to untrusted content + the ability to communicate externally. Combine all three and "an attacker can easily trick it into accessing your private data and sending it to that attacker." | [Simon Willison, Jun 2025](https://simonwillison.net/2025/Jun/16/the-lethal-trifecta/) |
+| **Brain / hands separation** | Run the agent's harness (the "brain": model calls, session state, credentials, monitoring) on a durable server, and spawn disposable sandboxes (the "hands") only to execute code. If a sandbox dies the agent carries on, and untrusted agent-written code never sits next to credentials. | Katelyn Lesse, Anthropic, Vercel Ship 2026 ([talk](https://www.youtube.com/watch?v=Fr5vzNknYJE), 1:21:53) |
+| **Credential brokering** | Code in the sandbox holds only a placeholder token; the real credential is injected at the egress firewall/proxy on the way out. Combine with deny-by-default egress and a kill switch kept outside the sandbox. | Anthropic and Vercel, Vercel Ship 2026; GitHub Agentic Workflows uses an API proxy for the same purpose |
+| **Verification engineer** | The engineer's role once agents write the code: building harnesses, acceptance tests and verifiable checks rather than hand-writing code. "We are now all verification engineers." | Tobi Lütke, Shopify, Vercel Ship 2026 (6:22:25) |
 | **Continuous AI** | Coding agents running in CI to keep improving a repository: "a third pillar beside CI and CD". | [GitHub Agentic Workflows](https://github.github.com/gh-aw/) |
 | **Gray factory** | The middle ground between human-reviewed and lights-out: lights dimmed, humans review by risk. | Victor Rentea ([talk](https://www.youtube.com/watch?v=H-z5mrBOD48)) |
 | **Harnessability** | How far a codebase's properties (types, module boundaries, frameworks) let you build guides and sensors. | Böckeler |
@@ -80,6 +83,7 @@ This is the companion to the talk *Software Factories: from driving an agent to 
 - Gabriel Martinez (G2i), [Generation Is Cheap, Review Is Expensive](https://www.youtube.com/watch?v=6qkzlT962es)
 - Ryan Lopopolo (OpenAI), [Harness Engineering](https://www.youtube.com/watch?v=am_oeAoUhew)
 - Victor Rentea, [Gray Factory: Code Review for Agentic Engineers](https://www.youtube.com/watch?v=H-z5mrBOD48)
+- Vercel Ship 2026, [SF livestream](https://www.youtube.com/watch?v=Fr5vzNknYJE): Katelyn Lesse (Anthropic) on Claude Managed Agents, brain/hands separation and agent security (1:17:28), and Tobi Lütke on Shopify's River agent and "verification engineers" (5:59:50). Company numbers are self-reported.
 
 **Evidence and history**
 - METR, [early-2025 developer productivity RCT](https://metr.org/blog/2025-07-10-early-2025-ai-experienced-os-dev-study/): 19% slower, while believing they were 20% faster. Then the [Feb 2026 update](https://metr.org/blog/2026-02-24-uplift-update/): likely faster now, but hard to measure
