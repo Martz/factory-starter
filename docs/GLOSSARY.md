@@ -21,6 +21,8 @@ This is the companion to the talk *Software Factories: from driving an agent to 
 | **Ralph loop** | `while :; do cat PROMPT.md \| claude-code ; done`: an agent re-run on a fixed prompt until the work converges. | Huntley |
 | **Inner / outer / meta loop** | Cheap checks before the PR (autonomy) / expensive checks after the PR (less human verification) / observing runs to improve the harness. | Dru Knox, Tessl ([talk](https://www.youtube.com/watch?v=X6l4lpA0_NY)) |
 | **Background (cloud) agent** | An unattended agent that runs in a remote sandbox, starts from a work item, and ends in a PR. | Stripe Minions, Ramp Inspect, GitHub Copilot coding agent |
+| **Trigger / ingress** | How work reaches the factory without someone typing a prompt: a ticket created or labelled, a webhook, an alert, a schedule. Here every trigger puts a ticket in the inbox. | Warp; `docs/TRIGGERS.md` |
+| **Precheck** | A cheap command a scheduler runs before starting an agent; the run only happens if it succeeds (e.g. `next --check`: is work waiting?). Turns a schedule into a trigger without webhooks. | Orca automations |
 | **Control plane** | The orchestration layer: dispatches runs, tracks them, retries, escalates, and hands off between cloud and local. | Warp factory stack; HumanLayer |
 | **Factory-as-code** | Agents, prompts, gates, limits and checkpoints in versioned files, reviewed and revertible ("Terraform for agents"). | Warp; `factory/factory.toml` here |
 | **Evidence** | Proof attached to an agent's change: test results, screenshots or video, reviewer verdicts, acceptance criteria met. | Warp, Ramp, Factory; `evidence.md` here |
