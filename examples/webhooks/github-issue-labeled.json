@@ -1,0 +1,25 @@
+{
+  "action": "labeled",
+  "label": {
+    "name": "factory"
+  },
+  "issue": {
+    "number": 3,
+    "title": "Show only items with a dietary tag",
+    "body": "The kitchen asks \"which orders are vegan?\" every week.\n\n- The CLI accepts `--only TAG` (case-insensitive), which lists the matching items (person, item, price) instead of the bill.\n- If nothing matches, print `no items tagged TAG` and exit 0.",
+    "html_url": "https://github.com/your-org/factory-starter/issues/3",
+    "state": "open",
+    "labels": [
+      {
+        "name": "factory"
+      }
+    ]
+  },
+  "repository": {
+    "name": "factory-starter",
+    "full_name": "your-org/factory-starter"
+  },
+  "sender": {
+    "login": "maintainer"
+  }
+}

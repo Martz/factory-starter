@@ -32,6 +32,12 @@ fix_rounds    = 2    # gate failures fed back to the build agent (Stripe minions
 review_rounds = 1    # reviewer "changes" verdicts sent back for one revision
 agent_timeout = 600  # seconds per agent call
 
+[ingress]
+# Tickets from webhooks and tracker payloads (run.py ticket --payload, run.py serve) are untrusted input.
+# Only tickets carrying this label enter the factory; restricting who can apply it is your first guard.
+# Tickets you queue yourself (run.py ticket "Title", --from FILE) skip this check. "" accepts everything.
+label = "factory"
+
 [checkpoints]
 # Where a human must say yes. Merging is always human.
 spec = false         # true (or --checkpoint spec) = pause for approval before building

@@ -1,0 +1,24 @@
+{
+  "action": "create",
+  "type": "Issue",
+  "createdAt": "2026-10-21T09:00:00.000Z",
+  "url": "https://linear.app/your-team/issue/LUN-2",
+  "data": {
+    "id": "7b1f0c2e-0000-4000-8000-000000000002",
+    "identifier": "LUN-2",
+    "title": "Add an optional service charge",
+    "description": "The restaurant adds 12.5% service. We need to share it fairly.\n\n- An order can have an optional service charge percentage (default 0).\n- `total()` includes the service charge, rounded to the penny.\n- `per_person()` shares the service charge in proportion to what each person ordered.\n- The CLI accepts `--service 12.5`.",
+    "url": "https://linear.app/your-team/issue/LUN-2",
+    "priority": 2,
+    "state": {
+      "name": "Todo"
+    },
+    "labels": [
+      {
+        "id": "l1",
+        "name": "factory",
+        "color": "#ff8a1f"
+      }
+    ]
+  }
+}

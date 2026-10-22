@@ -3,6 +3,9 @@
 
     python3 factory/run.py run work/001-reject-invalid-prices.md   # run the line on one work item
     python3 factory/run.py run --issue 12 --pr                      # GitHub issue in, draft PR out
+    python3 factory/run.py ticket "Title" --body "..."              # queue a ticket (or --payload FILE, --from FILE)
+    python3 factory/run.py next [--check]                           # run the line on the oldest waiting ticket
+    python3 factory/run.py serve [--run]                            # webhook receiver: Jira, Linear, GitHub → inbox
     python3 factory/run.py report                                   # metrics across runs
     python3 factory/run.py show [--diff | --try CMD]                # inspect the latest run
     python3 factory/run.py learn                                    # improvement loop: propose AGENTS.md rules
@@ -31,10 +34,14 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import agents  # noqa: E402
+import inbox  # noqa: E402
 
 FACTORY = Path(__file__).resolve().parent
 ROOT = Path(subprocess.run(["git", "rev-parse", "--show-toplevel"], cwd=FACTORY, capture_output=True, text=True).stdout.strip() or FACTORY.parent)
-STATE = ROOT / ".factory"
+# State lives in the main checkout, so runs started from a linked worktree (an Orca automation, CI) share one inbox and ledger.
+_COMMON = subprocess.run(["git", "rev-parse", "--path-format=absolute", "--git-common-dir"], cwd=FACTORY,
+                         capture_output=True, text=True).stdout.strip()
+STATE = (Path(_COMMON).parent if _COMMON else ROOT) / ".factory"
 LEDGER = STATE / "runs.jsonl"
 
 # ---------------------------------------------------------------------------------------------------
@@ -165,8 +172,9 @@ def read_work(args) -> tuple[str, str, str]:
         return f"issue-{data['number']}", data["title"], f"# {data['title']}\n\n{data['body']}\n"
     path = Path(args.work)
     text = path.read_text()
+    meta, _ = inbox.front_matter(text)             # tickets from the inbox carry source, key, url and a stable stem
     m = re.search(r"^#\s+(.+)$", text, re.M)
-    return path.stem, (m.group(1).strip() if m else path.stem), text
+    return meta.get("stem") or path.stem, (m.group(1).strip() if m else path.stem), text
 
 
 # ---------------------------------------------------------------------------------------------------
@@ -265,7 +273,9 @@ def cmd_run(args) -> int:
     started = time.time()
 
     print(f"\n {c('🏭 ' + cfg['factory']['name'], BOLD)}  {c('run ' + rid, DIM)}")
-    print(f"    {c('work:', DIM)} {title}  {c('(' + (f'issue #{args.issue}' if args.issue else args.work) + ')', DIM)}")
+    meta, _ = inbox.front_matter(work)
+    origin = f"issue #{args.issue}" if args.issue else (" ".join(x for x in (meta.get("source"), meta.get("key")) if x) if meta else args.work)
+    print(f"    {c('work:', DIM)} {title}  {c('(' + origin + ')', DIM)}")
     print(f"    {c('line:', DIM)} spec={roles['spec']} · build={roles['build']} · review={roles['review']}  "
           f"{c('· gates: ' + ', '.join(cfg.get('gates', {})), DIM)}\n")
 
@@ -633,17 +643,127 @@ def cmd_reset(args) -> int:
     return 0
 
 
+# ---------------------------------------------------------------------------------------------------
+# Ingress: tickets from anywhere → the inbox → the line (see factory/inbox.py)
+# ---------------------------------------------------------------------------------------------------
+def cmd_ticket(args) -> int:
+    """Queue a ticket: by hand, from a work item, or from a webhook/tracker JSON payload (file or stdin)."""
+    label = load_config().get("ingress", {}).get("label", "")
+    box, note, require_label = inbox.Inbox(STATE), "", False
+    if args.payload:
+        raw = sys.stdin.read() if args.payload == "-" else Path(args.payload).read_text()
+        tickets, note = inbox.parse(json.loads(raw or "null"))
+        require_label = True                       # payloads are untrusted: only labelled tickets get in
+    elif args.from_file:
+        path = Path(args.from_file)
+        text = path.read_text()
+        m = re.search(r"^#\s+(.+)$", text, re.M)
+        tickets = [inbox.Ticket(m.group(1).strip() if m else path.stem, text[m.end():] if m else text, args.key or "",
+                                args.source or "work-item", args.url or "", stem=path.stem)]
+    elif args.title:
+        body = sys.stdin.read() if args.body == "-" else (args.body or "")
+        tickets = [inbox.Ticket(args.title, body, args.key or "", args.source or "manual", args.url or "")]
+    else:
+        sys.exit('ticket needs a title, --from FILE or --payload FILE|-')
+    if not tickets:
+        print(c(f"   nothing queued: {note}", DIM))
+    for t in tickets:
+        path, msg = box.add(t, label, require_label)
+        print(f"   {c('✓', GREEN) if path else c('·', DIM)} {msg}" + (c(f"  {path.relative_to(STATE.parent)}", DIM) if path else ""))
+    waiting = len(box.pending())
+    print(c(f"   {waiting} waiting · next: python3 factory/run.py next", DIM))
+    return 0
+
+
+def cmd_next(args) -> int:
+    """Run the line on the oldest waiting ticket. --check: exit 0 only if one is waiting (precheck / cron guard)."""
+    box = inbox.Inbox(STATE)
+    waiting = box.pending()
+    if args.check:
+        print(f"{len(waiting)} ticket(s) waiting" + "".join(f"\n  {p.name}" for p in waiting[:5]))
+        return 0 if waiting else 1
+    if not waiting:
+        print("inbox empty: nothing to do")
+        return 0
+    ticket = box.claim(waiting[0])
+    meta, _ = inbox.front_matter(ticket.read_text())
+    args.work, args.issue = str(ticket), None
+    before = len(LEDGER.read_text().splitlines()) if LEDGER.exists() else 0
+    try:
+        code = cmd_run(args)
+    except BaseException:
+        ticket.rename(box.dir / ticket.name)       # not processed: put it back in the queue
+        raise
+    rows = LEDGER.read_text().splitlines() if LEDGER.exists() else []
+    row = json.loads(rows[-1]) if len(rows) > before else {}
+    done = box.settle(ticket, code == 0, {"run": row.get("id"), "outcome": row.get("outcome"), "branch": row.get("branch")})
+    who = meta.get("key") or meta.get("source", "ticket")
+    print(c(f"   ticket {who} → {done.relative_to(STATE.parent)}" + (f" · {len(box.pending())} still waiting" if box.pending() else ""), DIM))
+    return code
+
+
+def cmd_serve(args) -> int:
+    """Webhook receiver: tickets arrive over HTTP and land in the inbox; --run works through them as they come."""
+    cfg = load_config()
+    label = cfg.get("ingress", {}).get("label", "")
+    token = os.environ.get("FACTORY_WEBHOOK_TOKEN", "")
+    if args.host not in ("127.0.0.1", "localhost", "::1") and not token:
+        sys.exit("refusing to listen beyond localhost without FACTORY_WEBHOOK_TOKEN: webhook bodies are untrusted input")
+    box, wake = inbox.Inbox(STATE), threading.Event()
+    passthrough = [*(["--agent", args.agent] if args.agent else []), *(["--reviewer", args.reviewer] if args.reviewer else []),
+                   *(["--pr"] if args.pr else [])]
+    if args.run:
+        def worker():
+            while True:
+                wake.wait()
+                wake.clear()
+                while box.pending():
+                    subprocess.run([sys.executable, str(FACTORY / "run.py"), "next", *passthrough], cwd=ROOT)
+        threading.Thread(target=worker, daemon=True).start()
+        if box.pending():
+            wake.set()
+    url = f"http://{args.host}:{args.port}/webhook"
+    print(f"\n {c('🏭 ' + cfg['factory']['name'], BOLD)}  {c('listening for tickets', DIM)}")
+    print(f"    {c('webhook:', DIM)} POST {url}   {c('(Jira · Linear · GitHub issue events, or {title, body})', DIM)}")
+    print(f"    {c('guards:', DIM)}  label '{label or 'none'}' required · token {'on' if token else 'off (localhost only)'}")
+    print(f"    {c('worker:', DIM)}  " + ("runs each ticket as it arrives" if args.run else "off: queue only (python3 factory/run.py next)"))
+    print(c(f"    try:     curl -s -d @examples/webhooks/jira-issue-created.json {url}\n", DIM))
+    inbox.serve(box, label, args.host, args.port, token, on_queued=wake.set if args.run else None)
+    return 0
+
+
 def main() -> int:
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     sub = ap.add_subparsers(dest="cmd", required=True)
+    def run_options(p):
+        p.add_argument("--agent", choices=agents.ADAPTERS, help="use this agent for every station")
+        p.add_argument("--reviewer", choices=agents.ADAPTERS, help="override the review agent")
+        p.add_argument("--checkpoint", action="append", choices=["spec"], help="pause for a human at this checkpoint")
+        p.add_argument("--pr", action="store_true", help="push the branch and open a PR with the evidence (needs gh)")
+        p.add_argument("--record", action="store_true", help="save agent outputs to factory/replays/ for --agent replay")
+
     p = sub.add_parser("run", help="run the line on one work item")
     p.add_argument("work", nargs="?", help="work item markdown file, e.g. work/001-reject-invalid-prices.md")
     p.add_argument("--issue", type=int, help="take the work item from a GitHub issue instead (needs gh)")
-    p.add_argument("--agent", choices=agents.ADAPTERS, help="use this agent for every station")
-    p.add_argument("--reviewer", choices=agents.ADAPTERS, help="override the review agent")
-    p.add_argument("--checkpoint", action="append", choices=["spec"], help="pause for a human at this checkpoint")
-    p.add_argument("--pr", action="store_true", help="push the branch and open a PR with the evidence (needs gh)")
-    p.add_argument("--record", action="store_true", help="save agent outputs to factory/replays/ for --agent replay")
+    run_options(p)
+    p_t = sub.add_parser("ticket", help="queue a ticket in the inbox (by hand, from a work item, or a webhook payload)")
+    p_t.add_argument("title", nargs="?", help="ticket title (body via --body TEXT, or --body - for stdin)")
+    p_t.add_argument("--body")
+    p_t.add_argument("--key", help="tracker key, e.g. LUNCH-12 (used to de-duplicate)")
+    p_t.add_argument("--source", help="where it came from, e.g. jira (default: manual)")
+    p_t.add_argument("--url")
+    p_t.add_argument("--from", dest="from_file", metavar="FILE", help="queue a work/*.md item as a ticket")
+    p_t.add_argument("--payload", metavar="FILE", help="Jira/Linear/GitHub webhook JSON or a tracker CLI's --json output; - for stdin")
+    p_n = sub.add_parser("next", help="run the line on the oldest ticket in the inbox")
+    p_n.add_argument("--check", action="store_true", help="only report: exit 0 if a ticket is waiting, 1 if not")
+    run_options(p_n)
+    p_s = sub.add_parser("serve", help="webhook receiver: Jira, Linear and GitHub issue events → inbox")
+    p_s.add_argument("--host", default="127.0.0.1")
+    p_s.add_argument("--port", type=int, default=8765)
+    p_s.add_argument("--run", action="store_true", help="work through tickets as they arrive")
+    p_s.add_argument("--agent", choices=agents.ADAPTERS)
+    p_s.add_argument("--reviewer", choices=agents.ADAPTERS)
+    p_s.add_argument("--pr", action="store_true")
     sub.add_parser("report", help="metrics across runs")
     p_show = sub.add_parser("show", help="show a run (default: latest): evidence summary, --diff, or --try CMD")
     p_show.add_argument("run", nargs="?", help="run id or part of it")
@@ -657,11 +777,12 @@ def main() -> int:
     p_reset = sub.add_parser("reset", help="remove factory worktrees and branches")
     p_reset.add_argument("--all", action="store_true", help="also delete run history and evidence")
     args = ap.parse_args()
-    if args.cmd == "run":
-        if not args.work and not args.issue:
-            ap.error("run needs a work item file or --issue N")
+    if args.cmd == "run" and not args.work and not args.issue:
+        ap.error("run needs a work item file or --issue N")
+    if args.cmd in ("run", "next", "ticket", "serve"):
         STATE.mkdir(exist_ok=True)
-    return {"run": cmd_run, "report": cmd_report, "show": cmd_show, "learn": cmd_learn, "doctor": cmd_doctor, "reset": cmd_reset}[args.cmd](args)
+    return {"run": cmd_run, "ticket": cmd_ticket, "next": cmd_next, "serve": cmd_serve, "report": cmd_report,
+            "show": cmd_show, "learn": cmd_learn, "doctor": cmd_doctor, "reset": cmd_reset}[args.cmd](args)
 
 
 if __name__ == "__main__":

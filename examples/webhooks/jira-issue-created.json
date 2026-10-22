@@ -1,0 +1,116 @@
+{
+  "timestamp": 1792598400000,
+  "webhookEvent": "jira:issue_created",
+  "issue_event_type_name": "issue_created",
+  "user": {
+    "displayName": "Product Owner"
+  },
+  "issue": {
+    "id": "10004",
+    "key": "LUNCH-4",
+    "self": "https://your-team.atlassian.net/rest/api/3/issue/10004",
+    "fields": {
+      "summary": "Split the bill evenly",
+      "issuetype": {
+        "name": "Story"
+      },
+      "status": {
+        "name": "To Do"
+      },
+      "labels": [
+        "factory"
+      ],
+      "priority": {
+        "name": "Medium"
+      },
+      "description": {
+        "type": "doc",
+        "version": 1,
+        "content": [
+          {
+            "type": "paragraph",
+            "content": [
+              {
+                "type": "text",
+                "text": "Sometimes the team just splits the bill evenly, whatever people ordered."
+              }
+            ]
+          },
+          {
+            "type": "bulletList",
+            "content": [
+              {
+                "type": "listItem",
+                "content": [
+                  {
+                    "type": "paragraph",
+                    "content": [
+                      {
+                        "type": "text",
+                        "text": "Add "
+                      },
+                      {
+                        "type": "text",
+                        "text": "Order.split_evenly()",
+                        "marks": [
+                          {
+                            "type": "code"
+                          }
+                        ]
+                      },
+                      {
+                        "type": "text",
+                        "text": ", which returns each person's equal share of the total."
+                      }
+                    ]
+                  }
+                ]
+              },
+              {
+                "type": "listItem",
+                "content": [
+                  {
+                    "type": "paragraph",
+                    "content": [
+                      {
+                        "type": "text",
+                        "text": "Leftover pennies are given one each to people in alphabetical order, so the shares add up exactly to the total."
+                      }
+                    ]
+                  }
+                ]
+              },
+              {
+                "type": "listItem",
+                "content": [
+                  {
+                    "type": "paragraph",
+                    "content": [
+                      {
+                        "type": "text",
+                        "text": "The CLI accepts "
+                      },
+                      {
+                        "type": "text",
+                        "text": "--split-evenly",
+                        "marks": [
+                          {
+                            "type": "code"
+                          }
+                        ]
+                      },
+                      {
+                        "type": "text",
+                        "text": "."
+                      }
+                    ]
+                  }
+                ]
+              }
+            ]
+          }
+        ]
+      }
+    }
+  }
+}
