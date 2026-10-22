@@ -5,7 +5,7 @@ A minimal **software factory** you can read in 15 minutes, run in 5, and build o
 A work item goes in. Agents write a spec, build the change and review it independently. Deterministic gates check the work, the evidence is collected, and every run is recorded. A human decides what merges.
 
 ```
- ticket ─▶ 1 intake ─▶ 2 spec ─▶ 3 build ─▶ 4 gates ─▶ 5 review ─▶ 6 evidence ─▶ 7 ship ─▶ 8 record
+ ticket    ─▶ 1 intake ─▶ 2 spec ─▶ 3 build ─▶ 4 gates ─▶ 5 review ─▶ 6 evidence ─▶ 7 ship ─▶ 8 record
  (md / issue)   code       agent      agent       code        agent        code          code      code
                          read-only    writes    ▲  │ fail    independent                 ◆ human   runs.jsonl
                               ◆ optional        └──┘ fix      read-only                   merges        │
