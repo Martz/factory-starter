@@ -10,7 +10,7 @@
     python3 factory/run.py show [--diff | --try CMD]                # inspect the latest run
     python3 factory/run.py learn                                    # improvement loop: propose AGENTS.md rules
     python3 factory/run.py doctor [--deep]                          # preflight checks
-    python3 factory/run.py reset                                    # remove factory worktrees and branches
+    python3 factory/run.py reset                                    # start over: worktrees, branches, tickets
 
 Agents propose, code disposes: agents do the creative stations (spec, build, review), and this
 deterministic script owns the control flow, the gates, the evidence and the record.
@@ -634,12 +634,15 @@ def cmd_reset(args) -> int:
     branches = sh(["git", "for-each-ref", "--format=%(refname:short)", "refs/heads/factory/"], ROOT).stdout.split()
     for b in branches:
         sh(["git", "branch", "-q", "-D", b], ROOT, check=False)
+    tickets = list((STATE / "inbox").rglob("*.md")) if (STATE / "inbox").exists() else []
+    for t in tickets:                              # start over: queued and finished tickets (so keys can be reused)
+        t.unlink()
     removed = 0
     if args.all and STATE.exists():
         for p in sorted(STATE.rglob("*"), reverse=True):
             p.unlink() if p.is_file() else p.rmdir()
             removed += 1
-    print(f"removed {len(branches)} factory branches" + (f" and {removed} state files" if args.all else " (run history kept; --all clears it)"))
+    print(f"removed {len(branches)} factory branches, {len(tickets)} tickets" + (f" and {removed} state files" if args.all else " (run history kept; --all clears it)"))
     return 0
 
 
@@ -669,7 +672,8 @@ def cmd_ticket(args) -> int:
         print(c(f"   nothing queued: {note}", DIM))
     for t in tickets:
         path, msg = box.add(t, label, require_label)
-        print(f"   {c('✓', GREEN) if path else c('·', DIM)} {msg}" + (c(f"  {path.relative_to(STATE.parent)}", DIM) if path else ""))
+        print(f"   {c('✓', GREEN) if path else c('·', DIM)} {msg}" + (c(f"  {path.relative_to(STATE.parent)}", DIM) if path else "")
+              + (c("  (python3 factory/run.py reset starts over)", DIM) if "already" in msg else ""))
     waiting = len(box.pending())
     print(c(f"   {waiting} waiting · next: python3 factory/run.py next", DIM))
     return 0
@@ -774,7 +778,7 @@ def main() -> int:
     p_learn.add_argument("--agent", choices=agents.ADAPTERS)
     p_doc = sub.add_parser("doctor", help="preflight checks")
     p_doc.add_argument("--deep", action="store_true", help="also ping each agent CLI")
-    p_reset = sub.add_parser("reset", help="remove factory worktrees and branches")
+    p_reset = sub.add_parser("reset", help="start over: remove factory worktrees, branches and tickets (keeps run history)")
     p_reset.add_argument("--all", action="store_true", help="also delete run history and evidence")
     args = ap.parse_args()
     if args.cmd == "run" and not args.work and not args.issue:

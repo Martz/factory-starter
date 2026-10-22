@@ -34,6 +34,9 @@ python3 factory/run.py next
 
 # 3. You decide. Read the evidence and the change, then merge the branch (or don't).
 python3 factory/run.py show --diff
+
+# Again? Tickets are de-duplicated by key, so start over first (keeps the run history for `report`).
+python3 factory/run.py reset
 ```
 
 With only one agent installed, use it for every station: `python3 factory/run.py next --agent claude`. By default the build agent is Copilot and the reviewer is Codex (`factory/factory.toml`).
