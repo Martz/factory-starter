@@ -16,6 +16,8 @@ A work item goes in. Agents write a spec, build the change and review it indepen
 **Agents propose, code disposes.** Agents do the creative work (spec, build, review). A plain Python script owns the control flow, the gates, the evidence and the record, so the parts that must always happen don't depend on a model remembering to do them.
 
 > Companion to the talk *Software Factories: from driving an agent to designing the line*. **Glossary, metrics and references: [docs/GLOSSARY.md](docs/GLOSSARY.md).**
+>
+> **Prefer nothing to run?** [agentic-factory-starter](https://github.com/Martz/agentic-factory-starter) builds the same line from GitHub Agentic Workflows: label an issue, approve the spec, get a reviewed PR.
 
 ## Your first factory in 10 minutes
 

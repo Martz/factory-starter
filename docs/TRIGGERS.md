@@ -93,6 +93,7 @@ If you'd rather not run anything yourself, start with single-purpose automations
 | Option | What you get | Trigger |
 |---|---|---|
 | [GitHub Agentic Workflows](https://github.github.com/gh-aw/) + [githubnext/agentics](https://github.com/githubnext/agentics) | ready-made workflows: issue triage, CI doctor, Repo Assist; `gh aw add-wizard githubnext/agentics/issue-triage` | issues, PRs, schedules, `/commands` |
+| [agentic-factory-starter](https://github.com/Martz/agentic-factory-starter) | this line (spec → approve → build → gates + independent review → merge, plus weekly learn) as GitHub Agentic Workflows; a template repo with a setup script | labels on issues, PRs, a weekly schedule |
 | GitHub Copilot coding agent | assign an issue to Copilot, get a PR | issue assignment |
 | [Cursor Automations](https://cursor.com/docs/cloud-agent/automations) | cloud agents with memory | schedule, GitHub, Linear, Slack, PagerDuty, webhooks |
 | Codex | `@codex` on issues and PRs; scheduled automations in the app | mentions, schedules |
